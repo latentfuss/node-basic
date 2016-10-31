@@ -4,6 +4,8 @@ var env = require('node-env-file');						// https://github.com/grimen/node-env-f
 var methodOverride = require('method-override');		// https://github.com/expressjs/method-override             npm install method-override --save
 var passport = require('passport');						// https://github.com/jaredhanson/passport					npm install passport --save
 var ForceDotComStrategy = require('passport-forcedotcom').Strategy;	// https://github.com/joshbirk/passport-forcedotcom		npm install passport-forcedotcom --save
+var BasicStrategy = require('passport-http').BasicStrategy; // https://github.com/jaredhanson/passport-http npm install passport-http --save
+var db = require('./db');
 //var util = require('util');	//don't need?
   
 // Reads configuration from .env, if file does not exist then ignore
@@ -88,7 +90,24 @@ var sfStrategy = new ForceDotComStrategy({
   });
 });
 
-passport.use(sfStrategy);
+//passport.use(sfStrategy); // not going to use this in this one...
+
+// Configure the Basic strategy for use by Passport.
+//
+// The Basic strategy requires a `verify` function which receives the
+// credentials (`username` and `password`) contained in the request.  The
+// function must verify that the password is correct and then invoke `cb` with
+// a user object, which will be set at `req.user` in route handlers after
+// authentication.
+passport.use(new BasicStrategy(
+  function(username, password, cb) {
+    db.users.findByUsername(username, function(err, user) {
+      if (err) { return cb(err); }
+      if (!user) { return cb(null, false); }
+      if (user.password != password) { return cb(null, false); }
+      return cb(null, user);
+    });
+  }));
 
 
 var app = express();
@@ -111,19 +130,13 @@ app.use(passport.session());
 app.use(app.router);
 app.use(express.static(__dirname + '/public'));
 
-app.get('/', function(req, res) {
-  console.log(req.user);
-  if(!req.user) {
-    req.session.destroy();
-    req.logout();
-    return res.redirect('/login');
-  }
-  res.render('index', {
-    user: req.user
+app.get('/',
+  passport.authenticate('basic', { session: false }),
+  function(req, res) {
+    res.json({ username: req.user.username, email: req.user.emails[0].value });
   });
-});
 
-
+/*
 app.get('/login', function(req, res) {
   req.logout();
   req.session.destroy();
@@ -158,7 +171,7 @@ app.get('/authenticate/callback', passport.authenticate('forcedotcom', {
 app.get('/logout', function(req, res) {
   res.redirect('/login');
 });
-
+*/
 //dummy API resources
 var resources = [
     {
@@ -170,7 +183,26 @@ var resources = [
         name: 'Bar'
     }
 ];
+
+app.get('/resources',
+  passport.authenticate('basic', { session: false }),
+  function (req, res) {
+    res.send(resources);
+  });
+
+app.get('/resources/:id', 
+  passport.authenticate('basic', { session: false }),
+  function(req, res) {
+    var id = parseInt(req.params.id, 10);
+    var result = resources.filter(r => r.id === id)[0];
  
+    if (!result) {
+        res.sendStatus(404);
+    } else {
+        res.send(result);
+    }
+});
+/*
 app.get('/resources', ensureAuthenticated, function(req, res) {
     res.send(resources);
 });
@@ -185,7 +217,7 @@ app.get('/resources/:id', ensureAuthenticated, function(req, res) {
         res.send(result);
     }
 });
-
+*/
 //let's see....
 var port = process.env.PORT || 3000;
 app.listen(port);
